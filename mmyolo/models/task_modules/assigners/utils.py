@@ -5,6 +5,7 @@ from typing import Tuple
 import torch
 import torch.nn.functional as F
 from torch import Tensor
+from mmyolo.models.losses import bbox_overlaps_kld,bbox_overlaps
 
 
 def select_candidates_in_gts(priors_points: Tensor,
@@ -108,3 +109,42 @@ def yolov6_iou_calculator(bbox1: Tensor,
     union = bbox1_area + bbox2_area - overlap + eps
 
     return overlap / union
+
+def cast_tensor_type(x, scale=1., dtype=None):
+    if dtype == 'fp16':
+        # scale is for preventing overflows
+        x = (x / scale).half()
+    return x
+
+def yolox_iou_rfla_calculator(bbox1: Tensor,
+                                bbox2: Tensor,
+                                mode: str,
+                                is_aligned = False,
+                                eps: float = 1e-9) -> Tensor:
+    """Calculate iou for batch.
+
+    Args:
+        bbox1 (Tensor): shape(batch size, num_gt, 4)
+        bbox2 (Tensor): shape(batch size, num_priors, 4)
+        eps (float): Default to 1e-9.
+    Return:
+        (Tensor): IoU, shape(size, num_gt, num_priors)
+    """
+    # self.dtype == 'fp16'
+    assert bbox1.size(-1) in [0, 4, 5]
+    assert bbox2.size(-1) in [0, 4, 5]
+    if bbox2.size(-1) == 5:
+        bbox2 = bbox2[..., :4]
+    if bbox1.size(-1) == 5:
+        bbox1 = bbox1[..., :4]
+
+    # if self.dtype == 'fp16':
+    # # change tensor type to save cpu and cuda memory and keep speed
+    # bboxes1 = cast_tensor_type(bboxes1, self.scale, self.dtype)
+    # bboxes2 = cast_tensor_type(bboxes2, self.scale, self.dtype)
+    # overlaps = bbox_overlaps(bboxes1, bboxes2, mode, is_aligned)
+    # if not overlaps.is_cuda and overlaps.dtype == torch.float16:
+    #     # resume cpu float32
+    #     overlaps = overlaps.float()
+    # return overlaps
+    return bbox_overlaps_kld(bbox1, bbox2, 'kl', is_aligned)

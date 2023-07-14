@@ -3,10 +3,21 @@ import math
 from typing import Sequence, Union
 
 import torch
+import torch.nn as nn
+from thop import profile
 from mmdet.structures.bbox.transforms import get_box_tensor
 from torch import Tensor
 
 
+def print_flops(model:nn.modules, input_shape):
+    model.eval()
+    model = model.cuda()
+    if isinstance(input_shape, tuple):
+        input_shape = torch.randn(input_shape)
+    input_shape=input_shape.cuda()
+    MACs, params = profile(model, inputs=(input_shape, ))
+    print("params: %.2fMB ---- MACs: %.2fG" % ( params / (1000 ** 2), MACs / (1000 ** 3)))
+    
 def make_divisible(x: float,
                    widen_factor: float = 1.0,
                    divisor: int = 8) -> int:

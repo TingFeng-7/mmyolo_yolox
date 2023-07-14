@@ -101,7 +101,7 @@ class PPYOLOECSPResNet(BaseBackbone):
 
     def build_stem_layer(self) -> nn.Module:
         """Build a stem layer."""
-        if self.use_large_stem:
+        if self.use_large_stem: #! 3个和 2个的区别
             stem = nn.Sequential(
                 ConvModule(
                     self.input_channels,
@@ -127,7 +127,7 @@ class PPYOLOECSPResNet(BaseBackbone):
                     padding=1,
                     norm_cfg=self.norm_cfg,
                     act_cfg=self.act_cfg))
-        else:
+        else: #! 3个和 2个的区别
             stem = nn.Sequential(
                 ConvModule(
                     self.input_channels,

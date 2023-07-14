@@ -151,8 +151,7 @@ class RTMDetSepBNHeadModule(BaseModule):
             normal_init(rtm_reg, std=0.01)
 
     def forward(self, feats: Tuple[Tensor, ...]) -> tuple:
-        """Forward features from the upstream network.
-
+        """Forward features from the upstream network
         Args:
             feats (tuple[Tensor]): Features from the upstream network, each is
                 a 4D-tensor.
@@ -166,13 +165,11 @@ class RTMDetSepBNHeadModule(BaseModule):
               levels, each is a 4D-tensor, the channels number is
               num_base_priors * 4.
         """
-
         cls_scores = []
         bbox_preds = []
         for idx, x in enumerate(feats):
             cls_feat = x
             reg_feat = x
-
             for cls_layer in self.cls_convs[idx]:
                 cls_feat = cls_layer(cls_feat)
             cls_score = self.rtm_cls[idx](cls_feat)
@@ -191,6 +188,7 @@ class RTMDetHead(YOLOv5Head):
     """RTMDet head.
 
     Args:
+        利用各自的anchor生成器 和 bbox解码即可
         head_module(ConfigType): Base module used for RTMDetHead
         prior_generator: Points generator feature maps in
             2D points-based detectors.
@@ -226,8 +224,8 @@ class RTMDetHead(YOLOv5Head):
 
         super().__init__(
             head_module=head_module,
-            prior_generator=prior_generator,
-            bbox_coder=bbox_coder,
+            prior_generator=prior_generator, # note：0
+            bbox_coder=bbox_coder, # note：1
             loss_cls=loss_cls,
             loss_bbox=loss_bbox,
             train_cfg=train_cfg,
@@ -241,6 +239,7 @@ class RTMDetHead(YOLOv5Head):
             self.cls_out_channels = self.num_classes + 1
         # rtmdet doesn't need loss_obj
         self.loss_obj = None
+        # self.special_init() #note: add
 
     def special_init(self):
         """Since YOLO series algorithms will inherit from YOLOv5Head, but
@@ -271,6 +270,8 @@ class RTMDetHead(YOLOv5Head):
         """
         return self.head_module(x)
 
+    # loss(): forward() -> loss_by_feat()
+    # predict(): forward() -> predict_by_feat()
     def loss_by_feat(
             self,
             cls_scores: List[Tensor],
@@ -301,6 +302,7 @@ class RTMDetHead(YOLOv5Head):
         """
         num_imgs = len(batch_img_metas)
         featmap_sizes = [featmap.size()[-2:] for featmap in cls_scores]
+        # ----------START-----------------
         assert len(featmap_sizes) == self.prior_generator.num_levels
 
         gt_info = gt_instances_preprocess(batch_gt_instances, num_imgs)
@@ -316,11 +318,10 @@ class RTMDetHead(YOLOv5Head):
             mlvl_priors_with_stride = self.prior_generator.grid_priors(
                 featmap_sizes, device=device, with_stride=True)
             self.flatten_priors_train = torch.cat(
-                mlvl_priors_with_stride, dim=0)
+                mlvl_priors_with_stride, dim=0)#anchors_point
 
         flatten_cls_scores = torch.cat([
-            cls_score.permute(0, 2, 3, 1).reshape(num_imgs, -1,
-                                                  self.cls_out_channels)
+            cls_score.permute(0, 2, 3, 1).reshape(num_imgs, -1,self.cls_out_channels)
             for cls_score in cls_scores
         ], 1).contiguous()
 
@@ -328,16 +329,18 @@ class RTMDetHead(YOLOv5Head):
             bbox_pred.permute(0, 2, 3, 1).reshape(num_imgs, -1, 4)
             for bbox_pred in bbox_preds
         ], 1)
-        flatten_bboxes = flatten_bboxes * self.flatten_priors_train[..., -1,
-                                                                    None]
-        flatten_bboxes = distance2bbox(self.flatten_priors_train[..., :2],
-                                       flatten_bboxes)
+        # 乘以stride
+        flatten_bboxes = flatten_bboxes * self.flatten_priors_train[..., -1,None]
+        # 直接decode
+        flatten_bboxes = distance2bbox(self.flatten_priors_train[..., :2], flatten_bboxes)
 
+        # 1.label_assign 解码框去分配
         assigned_result = self.assigner(flatten_bboxes.detach(),
                                         flatten_cls_scores.detach(),
                                         self.flatten_priors_train, gt_labels,
                                         gt_bboxes, pad_bbox_flag)
-
+        
+        # -----------END----------------
         labels = assigned_result['assigned_labels'].reshape(-1)
         label_weights = assigned_result['assigned_labels_weights'].reshape(-1)
         bbox_targets = assigned_result['assigned_bboxes'].reshape(-1, 4)

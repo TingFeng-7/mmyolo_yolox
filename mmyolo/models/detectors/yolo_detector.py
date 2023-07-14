@@ -1,5 +1,8 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 import torch
+from typing import List, Tuple, Union
+
+from torch import Tensor
 from mmdet.models.detectors.single_stage import SingleStageDetector
 from mmdet.utils import ConfigType, OptConfigType, OptMultiConfig
 from mmengine.dist import get_world_size
@@ -51,3 +54,20 @@ class YOLODetector(SingleStageDetector):
         if use_syncbn and get_world_size() > 1:
             torch.nn.SyncBatchNorm.convert_sync_batchnorm(self)
             print_log('Using SyncBatchNorm()', 'current')
+
+    def extract_feat(self, batch_inputs: Tensor) -> Tuple[Tensor]:
+        """Extract features.
+
+        Args:
+            batch_inputs (Tensor): Image tensor with shape (N, C, H ,W).
+
+        Returns:
+            tuple[Tensor]: Multi-level features that may have
+            different resolutions.
+        """
+        x = self.backbone(batch_inputs)
+        if self.with_neck:
+            x = self.neck(x)
+        return x 
+        # todo 
+        # ! neck 的输出

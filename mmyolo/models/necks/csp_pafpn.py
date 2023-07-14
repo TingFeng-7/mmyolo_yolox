@@ -13,8 +13,8 @@ from .base_yolo_neck import BaseYOLONeck
 
 
 @MODELS.register_module()
-class YOLOv5PAFPN(BaseYOLONeck):
-    """Path Aggregation Network used in YOLOv5.
+class CSP_PAFPN(BaseYOLONeck):
+    """Path Aggregation Network used in PICO DET
 
     Args:
         in_channels (List[int]): Number of input channels per scale.
@@ -45,7 +45,6 @@ class YOLOv5PAFPN(BaseYOLONeck):
                  act_cfg: ConfigType = dict(type='SiLU', inplace=True),
                  init_cfg: OptMultiConfig = None):
         self.num_csp_blocks = num_csp_blocks
-        self.light_p2 = 0 # vanlila
         super().__init__(
             in_channels=in_channels,
             out_channels=out_channels,
@@ -146,7 +145,7 @@ class YOLOv5PAFPN(BaseYOLONeck):
             make_divisible(self.in_channels[idx], self.widen_factor),
             kernel_size=3,
             stride=2,
-            padding=1,
+            padding=1, #stride 2 直接减半
             norm_cfg=self.norm_cfg,
             act_cfg=self.act_cfg)
 

@@ -25,15 +25,17 @@ class YOLOXBBoxCoder(BaseBBoxCoder):
         tl_y, br_x, br_y).
 
         Args:
-            priors (torch.Tensor): Basic boxes or points, e.g. anchors.
+            priors (torch.Tensor): Basic boxes or points, e.g. anchors. [all_achors_num, 2] 网格左上的坐标
             pred_bboxes (torch.Tensor): Encoded boxes with shape
             stride (torch.Tensor | int): Strides of bboxes.
 
         Returns:
             torch.Tensor: Decoded boxes.
-        """
-        stride = stride[None, :, None]
-        xys = (pred_bboxes[..., :2] * stride) + priors
+        """ 
+        stride = stride[None, :, None] # torch.Size([20160]) [8xl,16xm,32xn] stride 铺平 行转列
+
+        #求出预测框的 cxcy ，wh
+        xys = (pred_bboxes[..., :2] * stride) + priors # priors:[ all_achors_num, 2]
         whs = pred_bboxes[..., 2:].exp() * stride
 
         tl_x = (xys[..., 0] - whs[..., 0] / 2)

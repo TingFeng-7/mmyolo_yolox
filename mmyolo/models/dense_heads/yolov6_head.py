@@ -298,16 +298,13 @@ class YOLOv6Head(YOLOv5Head):
 
         # pred info
         flatten_cls_preds = [
-            cls_pred.permute(0, 2, 3, 1).reshape(num_imgs, -1,
-                                                 self.num_classes)
+            cls_pred.permute(0, 2, 3, 1).reshape(num_imgs, -1, self.num_classes)
             for cls_pred in cls_scores
         ]
-
         flatten_pred_bboxes = [
             bbox_pred.permute(0, 2, 3, 1).reshape(num_imgs, -1, 4)
             for bbox_pred in bbox_preds
         ]
-
         flatten_cls_preds = torch.cat(flatten_cls_preds, dim=1)
         flatten_pred_bboxes = torch.cat(flatten_pred_bboxes, dim=1)
         flatten_pred_bboxes = self.bbox_coder.decode(
@@ -315,6 +312,7 @@ class YOLOv6Head(YOLOv5Head):
             self.stride_tensor[:, 0])
         pred_scores = torch.sigmoid(flatten_cls_preds)
 
+        # 1. 刚开始的label assign
         if current_epoch < self.initial_epoch:
             assigned_result = self.initial_assigner(
                 flatten_pred_bboxes.detach(), self.flatten_priors_train,

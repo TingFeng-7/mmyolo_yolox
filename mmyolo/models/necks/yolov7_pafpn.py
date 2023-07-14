@@ -75,7 +75,8 @@ class YOLOv7PAFPN(BaseYOLONeck):
         self.block_cfg = block_cfg
         self.block_cfg.setdefault('norm_cfg', norm_cfg)
         self.block_cfg.setdefault('act_cfg', act_cfg)
-
+        self.light_p2 = 0 # vanlila
+        
         super().__init__(
             in_channels=[
                 int(channel * widen_factor) for channel in in_channels

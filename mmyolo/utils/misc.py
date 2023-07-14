@@ -6,12 +6,34 @@ import numpy as np
 import torch
 from mmengine.utils import scandir
 from prettytable import PrettyTable
-
+import torch.nn as nn
+from thop import profile
 from mmyolo.models import RepVGGBlock
 
 IMG_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.ppm', '.bmp', '.pgm', '.tif',
                   '.tiff', '.webp')
 
+
+def print_flops(model, input_shape):
+    model.eval()
+    model = model.cpu()
+    if isinstance(input_shape, tuple):
+        input_shape = torch.randn(input_shape)
+        input_shape=input_shape.cpu()
+    if isinstance(input_shape, list):
+        for input in input_shape:
+            input = input.cpu()
+    MACs, params = profile(model, inputs=(input_shape, ))
+    print("params: %.2fMB ---- MACs: %.2fG" % ( params / (1000 ** 2), MACs / (1000 ** 3)))
+
+def print_neck_flops(model, input_tensor,device='cpu'):
+    model.eval()
+    model = model.to(device)
+    if isinstance(input_tensor, list):
+        for i in range(len(input_tensor)-1):
+            input_tensor[i]=input_tensor[i].to(device)
+    MACs, params = profile(model, inputs=(input_tensor, ))
+    print("params: %.2fMB ---- MACs: %.2fG" % ( params / (1000 ** 2), MACs / (1000 ** 3)))
 
 def switch_to_deploy(model):
     """Model switch to deploy status."""

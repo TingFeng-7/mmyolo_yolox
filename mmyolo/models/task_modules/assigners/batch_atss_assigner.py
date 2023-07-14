@@ -79,7 +79,9 @@ class BatchATSSAssigner(nn.Module):
         The assignment is done in following steps
 
         1. compute iou between all prior (prior of all pyramid levels) and gt
+
         2. compute center distance between all prior and gt
+        
         3. on each pyramid level, for each gt, select k prior whose center
            are closest to the gt center, so we total select k*l prior as
            candidates for each gt
@@ -109,7 +111,7 @@ class BatchATSSAssigner(nn.Module):
                     shape(batch_size, num_gt, number_classes)
                 'fg_mask_pre_prior' (Tensor): shape(bs, num_gt)
         """
-        # generate priors
+        # generate priors，center_priors
         cell_half_size = priors[:, 2:] * 2.5
         priors_gen = torch.zeros_like(priors)
         priors_gen[:, :2] = priors[:, :2] - cell_half_size
@@ -118,7 +120,7 @@ class BatchATSSAssigner(nn.Module):
 
         batch_size = gt_bboxes.size(0)
         num_gt, num_priors = gt_bboxes.size(1), priors.size(0)
-
+        # 1.初始化 分配batch
         assigned_result = {
             'assigned_labels':
             gt_bboxes.new_full([batch_size, num_priors], self.num_classes),
@@ -133,35 +135,34 @@ class BatchATSSAssigner(nn.Module):
         if num_gt == 0:
             return assigned_result
 
-        # compute iou between all prior (prior of all pyramid levels) and gt
+        # 1.compute iou between all prior (prior of all pyramid levels) and gt
         overlaps = self.iou_calculator(gt_bboxes.reshape([-1, 4]), priors)
-        overlaps = overlaps.reshape([batch_size, -1, num_priors])
+        overlaps = overlaps.reshape([batch_size, -1, num_priors]) # torch.Size([4, 321, 20160]) [batch, gt, all_anchors]
 
-        # compute center distance between all prior and gt
-        distances, priors_points = bbox_center_distance(
-            gt_bboxes.reshape([-1, 4]), priors)
+        # 2.compute center distance between all prior and gt
+        distances, priors_points = bbox_center_distance(gt_bboxes.reshape([-1, 4]), priors) # batch摊平
         distances = distances.reshape([batch_size, -1, num_priors])
 
-        # Selecting candidates based on the center distance
+        # 3.Selecting candidates based on the center distance 根据中心距离 进行初筛
         is_in_candidate, candidate_idxs = self.select_topk_candidates(
             distances, num_level_priors, pad_bbox_flag)
 
-        # get corresponding iou for the these candidates, and compute the
-        # mean and std, set mean + std as the iou threshold
+        # 4.get corresponding iou for the these candidates, and compute the
+        # mean and std, set mean + std as the iou threshold 通过计算这些正样本的均值和方差，设定iou阈值
         overlaps_thr_per_gt, iou_candidates = self.threshold_calculator(
             is_in_candidate, candidate_idxs, overlaps, num_priors, batch_size,
             num_gt)
-
-        # select candidates iou >= threshold as positive
+        # torch.Size([4, 321, 1])、 torch.Size([4, 321, 20160])
+        # 4.select candidates iou >= threshold as positive 通过上面的iou阈值，取出正样本
         is_pos = torch.where(
             iou_candidates > overlaps_thr_per_gt.repeat([1, 1, num_priors]),
             is_in_candidate, torch.zeros_like(is_in_candidate))
-
         is_in_gts = select_candidates_in_gts(priors_points, gt_bboxes)
+
         pos_mask = is_pos * is_in_gts * pad_bbox_flag
 
-        # if an anchor box is assigned to multiple gts,
-        # the one with the highest IoU will be selected.
+        #? if an anchor box is assigned to multiple gts,
+        #? the one with the highest IoU will be selected.
         gt_idx_pre_prior, fg_mask_pre_prior, pos_mask = \
             select_highest_overlaps(pos_mask, overlaps, num_gt)
 
@@ -176,6 +177,7 @@ class BatchATSSAssigner(nn.Module):
             ious = ious.max(axis=-2)[0].unsqueeze(-1)
             assigned_scores *= ious
 
+        # 2.赋值
         assigned_result['assigned_labels'] = assigned_labels.long()
         assigned_result['assigned_bboxes'] = assigned_bboxes
         assigned_result['assigned_scores'] = assigned_scores
@@ -292,7 +294,6 @@ class BatchATSSAssigner(nn.Module):
                     num_priors: int, batch_size: int,
                     num_gt: int) -> Tuple[Tensor, Tensor, Tensor]:
         """Get target info.
-
         Args:
             gt_labels (Tensor): Ground true labels,
                 shape(batch_size, num_gt, 1)
@@ -305,7 +306,6 @@ class BatchATSSAssigner(nn.Module):
             num_priors (int): Number of priors.
             batch_size (int): Batch size.
             num_gt (int): Number of ground truth.
-
         Return:
             assigned_labels (Tensor): Assigned labels,
                 shape(batch_size, num_priors)

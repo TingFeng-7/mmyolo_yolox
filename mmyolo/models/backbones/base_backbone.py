@@ -8,7 +8,7 @@ from mmcv.cnn import build_plugin_layer
 from mmdet.utils import ConfigType, OptMultiConfig
 from mmengine.model import BaseModule
 from torch.nn.modules.batchnorm import _BatchNorm
-
+from loguru import logger
 from mmyolo.registry import MODELS
 
 
@@ -110,12 +110,14 @@ class BaseBackbone(BaseModule, metaclass=ABCMeta):
 
         self.stem = self.build_stem_layer()
         self.layers = ['stem']
-
+        # stage0 stem layer
+        # stage1 - stage4
         for idx, setting in enumerate(arch_setting):
             stage = []
             stage += self.build_stage_layer(idx, setting)
             if plugins is not None:
-                stage += self.make_stage_plugins(plugins, idx, setting)
+                stage += self.make_stage_plugins(plugins, idx, setting) # 0 1 2 3
+            logger.info(f'BaseBackbone stage{idx + 1}')
             self.add_module(f'stage{idx + 1}', nn.Sequential(*stage))
             self.layers.append(f'stage{idx + 1}')
 
@@ -136,14 +138,10 @@ class BaseBackbone(BaseModule, metaclass=ABCMeta):
 
     def make_stage_plugins(self, plugins, stage_idx, setting):
         """Make plugins for backbone ``stage_idx`` th stage.
-
         Currently we support to insert ``context_block``,
         ``empirical_attention_block``, ``nonlocal_block``, ``dropout_block``
         into the backbone.
-
-
         An example of plugins format could be:
-
         Examples:
             >>> plugins=[
             ...     dict(cfg=dict(type='xxx', arg1='xxx'),
@@ -154,9 +152,7 @@ class BaseBackbone(BaseModule, metaclass=ABCMeta):
             >>> model = YOLOv5CSPDarknet()
             >>> stage_plugins = model.make_stage_plugins(plugins, 0, setting)
             >>> assert len(stage_plugins) == 1
-
         Suppose ``stage_idx=0``, the structure of blocks in the stage would be:
-
         .. code-block:: none
 
             conv1 -> conv2 -> conv3 -> yyy
@@ -179,8 +175,7 @@ class BaseBackbone(BaseModule, metaclass=ABCMeta):
         Returns:
             list[nn.Module]: Plugins for current stage
         """
-        # TODO: It is not general enough to support any channel and needs
-        # to be refactored
+        # TODO: It is not general enough to support any channel and needs to be refactored
         in_channels = int(setting[1] * self.widen_factor)
         plugin_layers = []
         for plugin in plugins:

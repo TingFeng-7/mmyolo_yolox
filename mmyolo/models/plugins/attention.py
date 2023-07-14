@@ -82,77 +82,83 @@ class SpatialAttention(BaseModule):
         out = self.conv(out)
         return out
 
+class h_sigmoid(nn.Module):
+    def __init__(self, inplace=True):
+        super(h_sigmoid, self).__init__()
+        self.relu = nn.ReLU6(inplace=inplace)
+
+    def forward(self, x):
+        return self.relu(x + 3) / 6
+
+class h_swish(nn.Module):
+    #-n x*sigmoid(硬件加速版)
+    def __init__(self, inplace=True):
+        super(h_swish, self).__init__()
+        self.sigmoid = h_sigmoid(inplace=inplace)
+
+    def forward(self, x):
+        return x * self.sigmoid(x)
 
 @MODELS.register_module()
-class CBAM(BaseModule):
-    """Convolutional Block Attention Module. arxiv link:
-    https://arxiv.org/abs/1807.06521v2.
+class CoordAtt(BaseModule):
+    def __init__(self,
+                 in_channels: int,
+                 reduce_ratio: int = 32,
+                 act_cfg: dict = dict(type='ReLU')):
+        super().__init__()
+        self.pool_h = nn.AdaptiveAvgPool2d((None, 1))
+        self.pool_w = nn.AdaptiveAvgPool2d((1, None))
 
-    Args:
-        in_channels (int): The input (and output) channels of the CBAM.
-        reduce_ratio (int): Squeeze ratio in ChannelAttention, the intermediate
-            channel will be ``int(channels/ratio)``. Defaults to 16.
-        kernel_size (int): The size of the convolution kernel in
-            SpatialAttention. Defaults to 7.
-        act_cfg (dict): Config dict for activation layer in ChannelAttention
-            Defaults to dict(type='ReLU').
-        init_cfg (dict or list[dict], optional): Initialization config dict.
-            Defaults to None.
-    """
+        mip = max(8, in_channels // reduce_ratio)
 
+        self.conv1 = nn.Conv2d(in_channels, mip, kernel_size=1, stride=1, padding=0)
+        self.bn1 = nn.BatchNorm2d(mip)
+        self.act = h_swish()
+
+        self.conv_h = nn.Conv2d(mip, in_channels, kernel_size=1, stride=1, padding=0)
+        self.conv_w = nn.Conv2d(mip, in_channels, kernel_size=1, stride=1, padding=0)
+
+    def forward(self, x):
+        identity = x
+
+        n, c, h, w = x.size()
+        x_h = self.pool_h(x)
+        x_w = self.pool_w(x).permute(0, 1, 3, 2)
+
+        y = torch.cat([x_h, x_w], dim=2)
+        y = self.conv1(y)
+        y = self.bn1(y)
+        y = self.act(y)
+
+        x_h, x_w = torch.split(y, [h, w], dim=2)
+        x_w = x_w.permute(0, 1, 3, 2)
+
+        a_h = self.conv_h(x_h).sigmoid()
+        a_w = self.conv_w(x_w).sigmoid()
+
+        out = identity * a_w * a_h
+
+        return out
+    
+@MODELS.register_module()
+class SEAttention(BaseModule):
     def __init__(self,
                  in_channels: int,
                  reduce_ratio: int = 16,
-                 kernel_size: int = 7,
                  act_cfg: dict = dict(type='ReLU'),
                  init_cfg: OptMultiConfig = None):
         super().__init__(init_cfg)
-        self.channel_attention = ChannelAttention(
-            channels=in_channels, reduce_ratio=reduce_ratio, act_cfg=act_cfg)
 
-        self.spatial_attention = SpatialAttention(kernel_size)
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.fc = nn.Sequential(
+            nn.Linear(in_channels, in_channels // reduce_ratio, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Linear(in_channels // reduce_ratio, in_channels, bias=False),
+            nn.Sigmoid()
+        )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward function."""
-        out = self.channel_attention(x) * x
-        out = self.spatial_attention(out) * out
-        return out
-
-
-# from torch.nn import init
-
-
-
-# class SEAttention(nn.Module):
-
-#     def __init__(self, channel=512,reduction=16):
-#         super().__init__()
-#         self.avg_pool = nn.AdaptiveAvgPool2d(1)
-#         self.fc = nn.Sequential(
-#             nn.Linear(channel, channel // reduction, bias=False),
-#             nn.ReLU(inplace=True),
-#             nn.Linear(channel // reduction, channel, bias=False),
-#             nn.Sigmoid()
-#         )
-
-
-#     def init_weights(self):
-#         for m in self.modules():
-#             if isinstance(m, nn.Conv2d):
-#                 init.kaiming_normal_(m.weight, mode='fan_out')
-#                 if m.bias is not None:
-#                     init.constant_(m.bias, 0)
-#             elif isinstance(m, nn.BatchNorm2d):
-#                 init.constant_(m.weight, 1)
-#                 init.constant_(m.bias, 0)
-#             elif isinstance(m, nn.Linear):
-#                 init.normal_(m.weight, std=0.001)
-#                 if m.bias is not None:
-#                     init.constant_(m.bias, 0)
-
-#     def forward(self, x):
-#         b, c, _, _ = x.size()
-#         y = self.avg_pool(x).view(b, c)
-#         y = self.fc(y).view(b, c, 1, 1)
-#         return x * y.expand_as(x)
-
+    def forward(self, x):
+        b, c, _, _ = x.size()
+        y = self.avg_pool(x).view(b, c)
+        y = self.fc(y).view(b, c, 1, 1)
+        return x * y.expand_as(x)

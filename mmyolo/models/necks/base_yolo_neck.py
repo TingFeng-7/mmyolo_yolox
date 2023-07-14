@@ -4,11 +4,13 @@ from typing import List, Union
 
 import torch
 import torch.nn as nn
+from mmcv.cnn import ConvModule, DepthwiseSeparableConvModule
 from mmdet.utils import ConfigType, OptMultiConfig
 from mmengine.model import BaseModule
 from torch.nn.modules.batchnorm import _BatchNorm
 
 from mmyolo.registry import MODELS
+
 
 
 @MODELS.register_module()
@@ -60,7 +62,7 @@ class BaseYOLONeck(BaseModule, metaclass=ABCMeta):
 
      P6 neck model structure diagram
                         +--------+                     +-------+
-                        |top_down|----------+--------->|  out  |---> output0
+                        |top_down|----p1----+--------->|  out  |---> output0
                         | layer1 |          |          | layer0|
                         +--------+          |          +-------+
      stride=8                ^              |
@@ -75,7 +77,7 @@ class BaseYOLONeck(BaseModule, metaclass=ABCMeta):
                              ^              |
                         +--------+          v
                         |top_down|    +-----------+
-                        | layer2 |--->|    cat    |
+                        | layer2 |-p2>|    cat    |
                         +--------+    +-----------+
      stride=16               ^              v
      idx=1  +------+    +--------+    +-----------+    +-------+
@@ -137,6 +139,7 @@ class BaseYOLONeck(BaseModule, metaclass=ABCMeta):
                  deepen_factor: float = 1.0,
                  widen_factor: float = 1.0,
                  upsample_feats_cat_first: bool = True,
+                 num_features: int = 3,
                  freeze_all: bool = False,
                  norm_cfg: ConfigType = None,
                  act_cfg: ConfigType = None,
@@ -151,6 +154,8 @@ class BaseYOLONeck(BaseModule, metaclass=ABCMeta):
         self.freeze_all = freeze_all
         self.norm_cfg = norm_cfg
         self.act_cfg = act_cfg
+        self.num_features = num_features
+        self.p5_out_to_p6_top = None #! add 
 
         self.reduce_layers = nn.ModuleList()
         for idx in range(len(in_channels)):
@@ -159,6 +164,7 @@ class BaseYOLONeck(BaseModule, metaclass=ABCMeta):
         # build top-down blocks
         self.upsample_layers = nn.ModuleList()
         self.top_down_layers = nn.ModuleList()
+        # 通道数减-1
         for idx in range(len(in_channels) - 1, 0, -1):
             self.upsample_layers.append(self.build_upsample_layer(idx))
             self.top_down_layers.append(self.build_top_down_layer(idx))
@@ -227,23 +233,25 @@ class BaseYOLONeck(BaseModule, metaclass=ABCMeta):
         for idx in range(len(self.in_channels)):
             reduce_outs.append(self.reduce_layers[idx](inputs[idx]))
 
-        # top-down path
+        # 自顶向下路径 top-down path 
+        # 从P4层到P2层 高到低
         inner_outs = [reduce_outs[-1]]
         for idx in range(len(self.in_channels) - 1, 0, -1):
             feat_high = inner_outs[0]
             feat_low = reduce_outs[idx - 1]
+            # print(f'idx {idx}, {len(self.in_channels) -1-idx}')
             upsample_feat = self.upsample_layers[len(self.in_channels) - 1 -
-                                                 idx](
-                                                     feat_high)
-            if self.upsample_feats_cat_first:
+                                                 idx](feat_high)
+            # 上采样层
+            if self.upsample_feats_cat_first: # 谁的通道排前面
                 top_down_layer_inputs = torch.cat([upsample_feat, feat_low], 1)
             else:
                 top_down_layer_inputs = torch.cat([feat_low, upsample_feat], 1)
             inner_out = self.top_down_layers[len(self.in_channels) - 1 - idx](
                 top_down_layer_inputs)
-            inner_outs.insert(0, inner_out)
+            inner_outs.insert(0, inner_out) # 自顶向下的三个输出
 
-        # bottom-up path
+        # 自底向上路径 bottom-up path 
         outs = [inner_outs[0]]
         for idx in range(len(self.in_channels) - 1):
             feat_low = outs[-1]
@@ -256,6 +264,39 @@ class BaseYOLONeck(BaseModule, metaclass=ABCMeta):
         # out_layers
         results = []
         for idx in range(len(self.in_channels)):
-            results.append(self.out_layers[idx](outs[idx]))
+            results.append(self.out_layers[idx](outs[idx])) # out_layer 正常操作
+        
+        # light p2
+        if self.light_p2: 
+            p3_upsample_p2 = nn.Upsample(scale_factor=2, mode='nearest')
+            results.insert(0, p3_upsample_p2(results[0]))
+        # light p6
+        if self.p5_out_to_p6_top:
+            results.append(self.p5_out_to_p6_top(results[-1]))
+
+        # 1· bottom-up path
+        # outs = [inner_outs[0]]
+        # for idx in range(len(self.in_channels) - 1):
+        #     feat_low = outs[-1]
+        #     feat_height = inner_outs[idx + 1]
+        #     downsample_feat = self.downsamples[idx](feat_low)
+        #     out = self.bottom_up_blocks[idx](paddle.concat(
+        #         [downsample_feat, feat_height], 1))
+        #     outs.append(out)
+
+        # 2· top_features = None
+        # if self.num_features == 4: # if 输出 4
+        #     self.first_top_conv = conv_func(
+        #         in_channels[0], in_channels[0], kernel_size, stride=2, act=act)
+        #     self.second_top_conv = conv_func(
+        #         in_channels[0], in_channels[0], kernel_size, stride=2, act=act)
+        #     self.spatial_scales.append(self.spatial_scales[-1] / 2)
+
+        # if self.num_features == 4:
+        #     top_features = self.first_top_conv(inputs[-1])
+        #     top_features = top_features + self.second_top_conv(outs[-1])
+        #     outs.append(top_features)
+
+        # return tuple(outs)
 
         return tuple(results)

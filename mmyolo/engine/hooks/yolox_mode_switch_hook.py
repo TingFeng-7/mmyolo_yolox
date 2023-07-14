@@ -51,4 +51,5 @@ class YOLOXModeSwitchHook(Hook):
 
             runner.logger.info('recreate the dataloader!')
             runner.logger.info('Add additional bbox reg loss now!')
-            model.bbox_head.use_bbox_aux = True
+            model.bbox_head.use_bbox_aux = True #
+            # model.bbox_head.use_bbox_aux = False 

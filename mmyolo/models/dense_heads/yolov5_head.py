@@ -268,6 +268,7 @@ class YOLOv5Head(BaseDenseHead):
         """
         return self.head_module(x)
 
+    # 利用各自的anchor生成器 和 bbox解码即可
     def predict_by_feat(self,
                         cls_scores: List[Tensor],
                         bbox_preds: List[Tensor],
@@ -324,7 +325,7 @@ class YOLOv5Head(BaseDenseHead):
         cfg.multi_label = multi_label
 
         num_imgs = len(batch_img_metas)
-        featmap_sizes = [cls_score.shape[2:] for cls_score in cls_scores]
+        featmap_sizes = [cls_score.shape[2:] for cls_score in cls_scores] #特征图尺寸
 
         # If the shape does not change, use the previous mlvl_priors
         if featmap_sizes != self.featmap_sizes:
@@ -340,6 +341,8 @@ class YOLOv5Head(BaseDenseHead):
                 (featmap_size.numel() * self.num_base_priors, ), stride) for
             featmap_size, stride in zip(featmap_sizes, self.featmap_strides)
         ]
+        # for level_map in mlvl_strides:
+        #     print(f'yolov5_head: num :{len(level_map)}')
         flatten_stride = torch.cat(mlvl_strides)
 
         # flatten cls_scores, bbox_preds and objectness

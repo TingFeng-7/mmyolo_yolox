@@ -19,7 +19,7 @@ class BaseMixImageTransform(BaseTransform, metaclass=ABCMeta):
     """A Base Transform of multiple images mixed.
 
     Suitable for training on multiple images mixed data augmentation like
-    mosaic and mixup.
+    mosaic and mixup. 适用于混合的数据增强
 
     Cached mosaic transform will random select images from the cache
     and combine them into one output image if use_cached is True.
@@ -94,10 +94,14 @@ class BaseMixImageTransform(BaseTransform, metaclass=ABCMeta):
 
         The transform steps are as follows:
         1. Randomly generate index list of other images.
+            随机生成其他图片的索引列表
         2. Before Mosaic or MixUp need to go through the necessary
             pre_transform, such as MixUp' pre_transform pipeline
             include: 'LoadImageFromFile','LoadAnnotations',
             'Mosaic' and 'RandomAffine'.
+            在mosaic和mixup之前需要通过 一系列必要的预处理，比如
+            1 mixup需要: 加载图片、加载注解
+            2 mosaic需要: 随机仿射变换
         3. Use mix_img_transform function to implement specific
             mix operations.
 
@@ -1110,7 +1114,7 @@ class YOLOXMixUp(BaseMixImageTransform):
         if self.bbox_clip_border:
             cp_retrieve_gt_bboxes.clip_([target_h, target_w])
 
-        # 8. mix up
+        # 8. mix up 0.5+0.5
         mixup_img = 0.5 * ori_img + 0.5 * padded_cropped_img
 
         retrieve_gt_bboxes_labels = retrieve_results['gt_bboxes_labels']

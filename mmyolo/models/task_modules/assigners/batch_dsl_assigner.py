@@ -178,16 +178,26 @@ class BatchDynamicSoftLabelAssigner(nn.Module):
         iou_cost = -torch.log(pairwise_ious + EPS) * self.iou_weight
 
         # select the predicted scores corresponded to the gt_labels
-        pairwise_pred_scores = pred_scores.permute(0, 2, 1)
+        # 分类损失如何计算？
+        # 每个anchor 每个类别有一个预测值 torch.Size([4, 20160, 10])  ==> [4, 10, 20160]
+        # 1.每个真实标签所属batch位置的索引
+        #   arange 先是变成了一行，然后view(-1,1)把行变成1列
+        #   repeat(1) 在第2个维上进行扩充 [4,1] ==> [4, 353]
+        # 2.真实标签值 
+        #   torch.Size([4, 353, 1]) ==> [4, 353] 列变成了行
+        
+        pairwise_pred_scores = pred_scores.permute(0, 2, 1) 
         idx = torch.zeros([2, batch_size, num_gt], dtype=torch.long)
         idx[0] = torch.arange(end=batch_size).view(-1, 1).repeat(1, num_gt)
         idx[1] = gt_labels.long().squeeze(-1)
-        pairwise_pred_scores = pairwise_pred_scores[idx[0],
-                                                    idx[1]].permute(0, 2, 1)
+        # {batch，num_class ，num_anchors} ==== > {batch，num_gt ，num_anchors} 为了与pair——ious对齐
+        pairwise_pred_scores = pairwise_pred_scores[idx[0],  idx[1]].permute(0, 2, 1)
+
         # classification cost
-        scale_factor = pairwise_ious - pairwise_pred_scores.sigmoid()
+        scale_factor = pairwise_ious - pairwise_pred_scores.sigmoid() #缩放因子
         pairwise_cls_cost = F.binary_cross_entropy_with_logits(
-            pairwise_pred_scores, pairwise_ious,
+            pairwise_pred_scores, #维度一致了
+            pairwise_ious, # iou 范围 0-1
             reduction='none') * scale_factor.abs().pow(2.0)
 
         cost_matrix = pairwise_cls_cost + iou_cost + soft_center_prior
@@ -206,21 +216,18 @@ class BatchDynamicSoftLabelAssigner(nn.Module):
 
         assigned_labels = gt_labels.new_full(pred_scores[..., 0].shape,
                                              self.num_classes)
-        assigned_labels[fg_mask_inboxes] = gt_labels[
-            batch_index, matched_gt_inds].squeeze(-1)
+        assigned_labels[fg_mask_inboxes] = gt_labels[batch_index, matched_gt_inds].squeeze(-1) # 所分配给的正样本的gt
         assigned_labels = assigned_labels.long()
 
-        assigned_labels_weights = gt_bboxes.new_full(pred_scores[..., 0].shape,
-                                                     1)
+        assigned_labels_weights = gt_bboxes.new_full(pred_scores[..., 0].shape, 1)# 固定值
 
         assigned_bboxes = gt_bboxes.new_full(pred_bboxes.shape, 0)
-        assigned_bboxes[fg_mask_inboxes] = gt_bboxes[batch_index,
-                                                     matched_gt_inds]
+        assigned_bboxes[fg_mask_inboxes] = gt_bboxes[batch_index, matched_gt_inds]
 
         assign_metrics = gt_bboxes.new_full(pred_scores[..., 0].shape, 0)
         assign_metrics[fg_mask_inboxes] = matched_pred_ious
 
-        return dict(
+        return dict( # 返回值
             assigned_labels=assigned_labels,
             assigned_labels_weights=assigned_labels_weights,
             assigned_bboxes=assigned_bboxes,
